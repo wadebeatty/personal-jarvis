@@ -1,0 +1,15 @@
+{
+  "name": "personal-jarvis",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Wade Beatty’s personal Jarvis voice webapp (ElevenLabs Conversational AI + Netlify)",
+  "scripts": {
+    "dev": "npx netlify-cli dev",
+    "build": "echo 'Static HUD — no frontend build'",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^4.2.6",
+    "typescript": "^5.9.3"
+  }
+}
