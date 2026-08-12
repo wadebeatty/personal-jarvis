@@ -51,6 +51,11 @@ npx netlify-cli dev
 
 Microphone access needs a secure context (localhost or HTTPS).
 
+```bash
+npm test        # signed-url function unit tests (mocked ElevenLabs)
+npm run typecheck
+```
+
 ## Netlify deploy (team `wadebeatty`)
 
 1. Create / link a site on the **wadebeatty** Netlify team from this repo.
