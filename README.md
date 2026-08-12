@@ -1,15 +1,15 @@
 # JARVIS — personal aide
 
-Wade Beatty’s personal Jarvis voice webapp: a dark Iron Man–inspired HUD on Netlify, talking to an [ElevenLabs Conversational AI](https://elevenlabs.io/docs/eleven-agents/customization/widget) agent.
+Wade Beatty’s personal Jarvis voice webapp: a dark Iron Man–inspired HUD on Netlify, talking to an [ElevenLabs Conversational AI](https://elevenlabs.io/docs/eleven-agents/libraries/java-script) agent via the **Client SDK**.
 
 This is a **personal aide only** — not Western Pest, not ward ministry.
 
 ## What v1 does
 
-- Single-page HUD (`public/`) with start / end conversation controls
-- ElevenLabs widget via `@elevenlabs/convai-widget-embed` (unpkg)
-- **Authenticated agent** (`enable_auth: true`) — the browser never gets `ELEVENLABS_API_KEY` and never embeds the public `agent-id` alone
-- Netlify Function `GET /.netlify/functions/signed-url` mints a short-lived signed URL, then the HUD starts the widget with that URL
+- Single-page HUD (`public/`) with Initiate / End conversation controls
+- Voice session via [`@elevenlabs/client`](https://www.npmjs.com/package/@elevenlabs/client) (CDN browser bundle)
+- **Authenticated agent** (`enable_auth: true`) — the browser never gets `ELEVENLABS_API_KEY` and never embeds the public `agent-id`
+- Netlify Function `GET /.netlify/functions/signed-url` mints a short-lived signed URL, then the HUD calls `Conversation.startSession({ signedUrl })`
 
 Out of scope for v1: tool calling, voice cloning, Western Pest, and ward ministry features.
 
@@ -26,18 +26,24 @@ Browser HUD  --GET-->  /.netlify/functions/signed-url
 Browser HUD  <-- { signedUrl } --
                               |
                               v
-              <elevenlabs-convai signed-url="wss://...">
+         Conversation.startSession({ signedUrl, connectionType: "websocket" })
+                              |
+                              v
+                    mic capture + agent audio playback
 ```
 
 1. Wade taps **Initiate**.
-2. The page calls `GET /.netlify/functions/signed-url`.
+2. The page requests microphone permission, then calls `GET /.netlify/functions/signed-url`.
 3. The function calls  
    `GET https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=…`  
    with header `xi-api-key` from `ELEVENLABS_API_KEY`.
 4. The function returns JSON `{ "signedUrl": "wss://..." }` (camelCase for the client; ElevenLabs itself returns `signed_url`).
-5. The HUD sets `signed-url` on the widget and calls `startConversation()`. Signed URLs last about **15 minutes** to *start* a session; an open conversation can continue after that.
+5. The HUD starts a real Client SDK session with that URL. HUD **ONLINE** is set only after `startSession` connects (`onConnect`). Signed URLs last about **15 minutes** to *start* a session; an open conversation can continue after that.
+6. **End** calls `conversation.endSession()` and returns the HUD to STANDBY.
 
-Agent ID (fixed): `agent_0901kzw48twfeq4ar7jn0f87dx94`
+The public embed widget (`@elevenlabs/convai-widget-embed`) is **not** used. Authenticated agents need the Client SDK; the widget also does not expose `startConversation` / `endConversation`, so a clipped embed would never start a session.
+
+Agent ID (server-only, via env / function default): `agent_0901kzw48twfeq4ar7jn0f87dx94`
 
 ## Local development
 
@@ -87,15 +93,38 @@ Do **not** prefix these with `VITE_` / `PUBLIC_` — they must stay server-side.
 
 The function reads env with `Netlify.env.get(...)`. It never returns the API key. Failures return a generic JSON `{ "error": "..." }` without upstream payloads.
 
-## Widget
+## Voice client
 
-Loaded from:
+Loaded from a pinned CDN browser bundle (IIFE). This is the `@elevenlabs/client` **browser** entry — it registers microphone capture and audio playback. A bare ESM import of the package default export does **not** register those and cannot start a voice session.
 
 ```html
-<script src="https://unpkg.com/@elevenlabs/convai-widget-embed@0.15.1" async></script>
+<script src="https://unpkg.com/@elevenlabs/client@1.17.0/dist/lib.iife.js" defer></script>
 ```
 
-The `<elevenlabs-convai>` element is created **without** `agent-id`. After the signed URL is fetched, the HUD sets `signed-url` and starts the session. The default widget chrome is clipped so the HUD orb / buttons stay the UI.
+`public/js/app.js` then uses `ElevenLabsClient.Conversation.startSession({ signedUrl, connectionType: "websocket" })`.
+
+HUD states track the real session:
+
+| State | Label | When |
+| --- | --- | --- |
+| connecting | AUTHORIZING / CONNECTING | mic + signed URL + websocket handshake |
+| listening | ONLINE | session started, agent listening |
+| speaking | SPEAKING | agent audio playing |
+| ended | STANDBY | `endSession` or agent hangup |
+| error | FAULT | start failure or unexpected disconnect |
+
+Do not set `agent-id` in the page. The signed URL already authorizes this private agent.
+
+## Manual voice check
+
+On the deployed site (HTTPS):
+
+1. Click **Initiate** and allow the microphone.
+2. HUD should move AUTHORIZING → CONNECTING → **ONLINE** (not ONLINE before the session exists).
+3. Hear Jarvis’s first spoken message (orb **SPEAKING**).
+4. Talk; hear a reply.
+5. Click **End conversation** → STANDBY.
+6. ElevenLabs conversation history for the agent should show a new session (not stay at 0).
 
 ## Repo layout
 
@@ -106,6 +135,8 @@ public/                 static HUD (publish directory)
   js/app.js
 netlify/functions/
   signed-url.ts         signed URL minting
+tests/
+  signed-url.test.ts
 netlify.toml
 .env.example
 ```

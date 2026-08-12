@@ -246,10 +246,19 @@ body {
   animation: pulse 0.9s ease-in-out infinite;
 }
 
+.orb[data-state="listening"],
 .orb[data-state="live"] {
   box-shadow:
     0 0 70px rgba(62, 224, 255, 0.8),
     inset 0 0 28px rgba(255, 255, 255, 0.28);
+}
+
+.orb[data-state="speaking"] {
+  animation: pulse 0.55s ease-in-out infinite;
+  box-shadow:
+    0 0 90px rgba(62, 224, 255, 0.95),
+    0 0 28px rgba(201, 162, 39, 0.45),
+    inset 0 0 32px rgba(255, 255, 255, 0.35);
 }
 
 .orb[data-state="error"] {
@@ -346,20 +355,6 @@ body {
   max-width: 40rem;
   margin-inline: auto;
   line-height: 1.6;
-}
-
-.jarvis-widget {
-  position: fixed;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
-  border: 0;
-  padding: 0;
-  bottom: 0;
-  right: 0;
 }
 
 @keyframes spin {

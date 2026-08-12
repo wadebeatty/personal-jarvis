@@ -32,7 +32,7 @@ test("signed-url function mints camelCase JSON and never echoes the API key", as
     );
   });
 
-  const { default: handler } = await import("./signed-url.ts");
+  const { default: handler } = await import("../netlify/functions/signed-url.ts");
   const response = await handler(
     new Request("https://example.com/.netlify/functions/signed-url"),
   );
@@ -53,7 +53,7 @@ test("signed-url function mints camelCase JSON and never echoes the API key", as
 
 test("signed-url function rejects non-GET and missing API key", async () => {
   installEnv({});
-  const { default: handler } = await import("./signed-url.ts");
+  const { default: handler } = await import("../netlify/functions/signed-url.ts");
 
   const method = await handler(
     new Request("https://example.com/.netlify/functions/signed-url", {
