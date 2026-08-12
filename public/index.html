@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#03070c" />
+    <meta
+      name="description"
+      content="JARVIS — Wade Beatty’s personal voice aide. Not Western Pest. Not ward ministry."
+    />
+    <title>JARVIS · Personal Aide</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%2303070c' stroke='%233ee0ff' stroke-width='3'/%3E%3Ccircle cx='32' cy='32' r='10' fill='%233ee0ff'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;800&family=Share+Tech+Mono&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body>
+    <div class="scanlines" aria-hidden="true"></div>
+    <div class="hex-grid" aria-hidden="true"></div>
+    <div class="vignette" aria-hidden="true"></div>
+
+    <div class="hud-frame" aria-hidden="true">
+      <span class="corner tl"></span>
+      <span class="corner tr"></span>
+      <span class="corner bl"></span>
+      <span class="corner br"></span>
+    </div>
+
+    <header class="top-bar">
+      <div class="brand">
+        <p class="eyebrow">Wade Beatty // Secure Channel</p>
+        <h1>JARVIS</h1>
+        <p class="subtitle">Personal Aide</p>
+      </div>
+      <div class="sys-readout">
+        <div class="chip">
+          <span class="dot" id="auth-dot"></span>
+          <span>AUTH</span>
+          <strong id="auth-label">SIGNED URL</strong>
+        </div>
+        <div class="chip">
+          <span class="dot idle" id="link-dot"></span>
+          <span>LINK</span>
+          <strong id="clock">--:--:--</strong>
+        </div>
+      </div>
+    </header>
+
+    <main class="stage">
+      <section class="orb-wrap" aria-label="Jarvis status">
+        <div class="ring ring-outer" aria-hidden="true"></div>
+        <div class="ring ring-mid" aria-hidden="true"></div>
+        <div class="ring ring-inner" aria-hidden="true"></div>
+        <div class="orb" id="orb" data-state="idle">
+          <div class="orb-core"></div>
+          <div class="orb-glow"></div>
+        </div>
+        <p class="status-kicker">SYSTEM</p>
+        <p class="status" id="status">STANDBY</p>
+        <p class="status-detail" id="status-detail">
+          Awaiting initiation. Microphone access is required to speak.
+        </p>
+      </section>
+
+      <div class="controls">
+        <button type="button" class="btn primary" id="start-btn">
+          <span class="btn-glyph">▶</span>
+          Initiate
+        </button>
+        <button type="button" class="btn ghost" id="end-btn" disabled>
+          <span class="btn-glyph">■</span>
+          End conversation
+        </button>
+      </div>
+
+      <p class="error" id="error" hidden></p>
+    </main>
+
+    <footer class="footer">
+      <p>
+        Personal aide only — not Western Pest, not ward ministry.
+      </p>
+    </footer>
+
+    <!--
+      Widget is driven by a short-lived signed URL from /.netlify/functions/signed-url.
+      Do not set agent-id here: the agent has enable_auth and must not be public-embedded.
+    -->
+    <elevenlabs-convai
+      id="jarvis-widget"
+      class="jarvis-widget"
+      aria-hidden="true"
+      variant="expanded"
+      avatar-orb-color-1="#3ee0ff"
+      avatar-orb-color-2="#1256c8"
+      start-call-text="Initiate"
+      end-call-text="End conversation"
+      listening-text="Listening"
+      speaking-text="Jarvis speaking"
+    ></elevenlabs-convai>
+
+    <script
+      src="https://unpkg.com/@elevenlabs/convai-widget-embed@0.15.1"
+      async
+      type="text/javascript"
+    ></script>
+    <script src="/js/app.js" type="module"></script>
+  </body>
+</html>
