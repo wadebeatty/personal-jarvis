@@ -87,26 +87,13 @@
     </footer>
 
     <!--
-      Widget is driven by a short-lived signed URL from /.netlify/functions/signed-url.
-      Do not set agent-id here: the agent has enable_auth and must not be public-embedded.
+      Authenticated agent (enable_auth): use the Client SDK with a short-lived
+      signed URL from /.netlify/functions/signed-url. Do not embed agent-id.
+      lib.iife.js is the browser bundle (registers mic/audio worklets).
     -->
-    <elevenlabs-convai
-      id="jarvis-widget"
-      class="jarvis-widget"
-      aria-hidden="true"
-      variant="expanded"
-      avatar-orb-color-1="#3ee0ff"
-      avatar-orb-color-2="#1256c8"
-      start-call-text="Initiate"
-      end-call-text="End conversation"
-      listening-text="Listening"
-      speaking-text="Jarvis speaking"
-    ></elevenlabs-convai>
-
     <script
-      src="https://unpkg.com/@elevenlabs/convai-widget-embed@0.15.1"
-      async
-      type="text/javascript"
+      src="https://unpkg.com/@elevenlabs/client@1.17.0/dist/lib.iife.js"
+      defer
     ></script>
     <script src="/js/app.js" type="module"></script>
   </body>

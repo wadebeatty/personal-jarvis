@@ -8,7 +8,7 @@
     "dev": "npx netlify-cli dev",
     "build": "echo 'Static HUD — no frontend build'",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test netlify/functions/signed-url.test.ts"
+    "test": "node --experimental-strip-types --test tests/signed-url.test.ts"
   },
   "devDependencies": {
     "@netlify/functions": "^4.2.6",
