@@ -6,7 +6,8 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["@netlify/functions"]
+    "allowImportingTsExtensions": true,
+    "types": ["node", "@netlify/functions"]
   },
   "include": ["netlify/functions/**/*.ts"],
   "exclude": ["netlify/functions/**/*.test.ts"]
