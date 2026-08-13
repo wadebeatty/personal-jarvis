@@ -92,8 +92,16 @@ npm run typecheck
 2. Build settings are in `netlify.toml`:
    - Publish directory: `public`
    - Functions directory: `netlify/functions`
+   - Build command: `npm ci && npm run build` (installs `@netlify/blobs` so Functions v2 can copy it into the zip, then checks the import resolves)
    - No frontend bundler
-3. Site env vars (Site configuration → Environment variables), all contexts:
+3. Deploy through **Git** (merge to the production branch) or:
+
+   ```bash
+   npx netlify-cli deploy --build --prod
+   ```
+
+   Do **not** use `netlify deploy --prod --dir=public --functions=netlify/functions`. That skips `npm ci` and function dependency tracing. Production then 502s with `Cannot find package '@netlify/blobs'` from `bridge-pending.mjs`.
+4. Site env vars (Site configuration → Environment variables), all contexts:
 
    | Variable | Value |
    | --- | --- |
@@ -103,8 +111,8 @@ npm run typecheck
 
    Do **not** set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, or `GOOGLE_REFRESH_TOKEN` on Netlify. Calendar/email access lives on Toquer/Forge via Grok Bot MCP.
 
-4. Deploy. Production and Deploy Previews both need the same secrets so signed-url and the bridge can run.
-5. **Hold ElevenLabs tool registration** until `JARVIS_TOOL_SECRET` is set and Toquer/Forge is polling `bridge-pending`. Toquer then updates the Jarvis prompt/walls and attaches tools using `scripts/jarvis-tools.schema.json`.
+5. Production and Deploy Previews both need the same secrets so signed-url and the bridge can run.
+6. **Hold ElevenLabs tool registration** until `JARVIS_TOOL_SECRET` is set and Toquer/Forge is polling `bridge-pending`. Toquer then updates the Jarvis prompt/walls and attaches tools using `scripts/jarvis-tools.schema.json`.
 
 Do **not** prefix these with `VITE_` / `PUBLIC_` — they must stay server-side. Never commit refresh tokens, API keys, or `JARVIS_TOOL_SECRET`.
 
@@ -288,6 +296,15 @@ curl -sS -X POST "$URL/.netlify/functions/bridge-complete" \
 
 Smoke:
 
+- **Packaging:** `GET /.netlify/functions/bridge-pending` must not 502.
+
+  ```bash
+  URL=https://personal-jarvis-813.netlify.app
+  curl -sS -o /tmp/bridge-pending.out -w "%{http_code}\n" \
+    "$URL/.netlify/functions/bridge-pending"
+  ```
+
+  Without `X-Jarvis-Secret` expect **401** (or **500** if `JARVIS_TOOL_SECRET` is unset). **200** with the secret. **502** with `Cannot find package '@netlify/blobs'` means the deploy skipped `npm ci`.
 - With secret: `POST tools-calendar` creates a job visible on `GET bridge-pending`
 - `POST bridge-complete` with a fake summary → the waiting `tools-calendar` request returns that summary
 - Without secret → `401`

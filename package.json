@@ -6,7 +6,7 @@
   "description": "Wade Beatty’s personal Jarvis voice webapp (ElevenLabs Conversational AI + Netlify)",
   "scripts": {
     "dev": "npx netlify-cli dev",
-    "build": "echo 'Static HUD — no frontend build'",
+    "build": "node --input-type=module -e \"import('@netlify/blobs').then((m) => { if (typeof m.getStore !== 'function') process.exit(1) })\"",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "oauth:google": "node scripts/google-oauth-setup.mjs",
