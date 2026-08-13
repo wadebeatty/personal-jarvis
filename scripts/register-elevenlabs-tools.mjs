@@ -2,9 +2,10 @@
 /**
  * Jarvis webhook tool schemas + optional later ElevenLabs workspace upsert.
  *
- * HOLD: do not register tools on the ElevenLabs agent yet. Toquer updates
- * prompt/walls from scripts/jarvis-tools.schema.json after Google readonly
- * OAuth + JARVIS_TOOL_SECRET are set on Netlify.
+ * HOLD: do not register tools on the ElevenLabs agent yet. The connector-bridge
+ * is ready when JARVIS_TOOL_SECRET is set on Netlify (GOOGLE_* is not required).
+ * Toquer/Forge fulfills calendar/email jobs via Grok Bot MCP. Toquer updates
+ * prompt/walls from scripts/jarvis-tools.schema.json.
  *
  * Default (no flags): print webhook paths and request/response schemas. No API calls.
  *
@@ -72,7 +73,7 @@ function printHoldAndSchemas() {
   console.log("Full request/response schemas: scripts/jarvis-tools.schema.json");
   console.log("Draft prompt for Toquer (not applied): scripts/jarvis-system-prompt.txt");
   console.log("\nThis command made no ElevenLabs API calls.");
-  console.log("After Google OAuth + JARVIS_TOOL_SECRET are on Netlify, Toquer can wire the agent.");
+  console.log("After JARVIS_TOOL_SECRET is on Netlify and the fulfill agent is polling, Toquer can wire the agent.");
   console.log("Workspace-only upsert later: node scripts/register-elevenlabs-tools.mjs --apply");
 }
 

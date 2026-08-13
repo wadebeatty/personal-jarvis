@@ -1,5 +1,4 @@
 import { MAX_RESULTS, type ToolInput } from "./http.ts";
-import { googleJson } from "./google.ts";
 import { addDays, formatSpokenDateTime, startOfDay, wallTime } from "./denver.ts";
 import { countLabel, displayFrom, stripHtml, truncate } from "./speakable.ts";
 
@@ -102,31 +101,29 @@ export function shapeEmailResponse(
   return { ok: true, summary, messages: shaped };
 }
 
-export async function searchEmail(input: ToolInput, now = new Date()) {
-  const q = toGmailQuery(input, now);
-  const listUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
-  listUrl.searchParams.set("q", q);
-  listUrl.searchParams.set("maxResults", String(MAX_RESULTS));
+/** Accept speakable messages or Gmail-like payloads from the fulfill agent. */
+export function normalizeEmailPayload(payload: unknown): SpeakableMessage[] {
+  const obj =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : {};
+  const list = Array.isArray(obj.messages) ? obj.messages : Array.isArray(payload) ? payload : [];
 
-  const list = await googleJson<{ messages?: { id: string }[] }>(listUrl);
-  const ids = (list.messages ?? []).slice(0, MAX_RESULTS).map((m) => m.id).filter(Boolean);
-  if (ids.length === 0) {
-    return shapeEmailResponse([]);
-  }
-
-  const messages: GmailMessage[] = [];
-  for (const id of ids) {
-    const url = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}`);
-    url.searchParams.set("format", "metadata");
-    url.searchParams.set("metadataHeaders", "From");
-    url.searchParams.append("metadataHeaders", "Subject");
-    url.searchParams.append("metadataHeaders", "Date");
-    try {
-      messages.push(await googleJson<GmailMessage>(url));
-    } catch {
-      // Skip a single failed fetch; still return the rest.
+  const out: SpeakableMessage[] = [];
+  for (const item of list) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const rec = item as Record<string, unknown>;
+    if (typeof rec.from === "string" && typeof rec.subject === "string") {
+      out.push({
+        from: truncate(stripHtml(rec.from), 80),
+        subject: truncate(stripHtml(rec.subject), 80),
+        date: typeof rec.date === "string" ? truncate(stripHtml(rec.date), 80) : "unknown date",
+        snippet: truncate(typeof rec.snippet === "string" ? rec.snippet : "", 140),
+      });
+    } else {
+      out.push(shapeEmailMessage(rec as GmailMessage));
     }
+    if (out.length >= MAX_RESULTS) break;
   }
-
-  return shapeEmailResponse(messages);
+  return out;
 }

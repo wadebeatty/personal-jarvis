@@ -1,13 +1,10 @@
 import { MAX_RESULTS, type ToolInput } from "./http.ts";
-import { googleJson } from "./google.ts";
 import {
-  DENVER_TZ,
   addDays,
   formatClock,
   formatWeekdayDate,
   parseIso,
   startOfDay,
-  toRfc3339,
   wallTime,
   weekdayIndex,
   zonedInstant,
@@ -201,17 +198,39 @@ export function shapeCalendarResponse(
   return { ok: true, summary, events: shaped };
 }
 
-export async function searchCalendar(input: ToolInput, now = new Date()) {
-  const window = resolveCalendarWindow(input, now);
-  const url = new URL("https://www.googleapis.com/calendar/v3/calendars/primary/events");
-  url.searchParams.set("timeMin", toRfc3339(window.timeMin));
-  url.searchParams.set("timeMax", toRfc3339(window.timeMax));
-  url.searchParams.set("singleEvents", "true");
-  url.searchParams.set("orderBy", "startTime");
-  url.searchParams.set("maxResults", String(MAX_RESULTS));
-  url.searchParams.set("timeZone", DENVER_TZ);
-  if (window.q) url.searchParams.set("q", window.q);
+/** Accept speakable events or Google-like items from the fulfill agent. */
+export function normalizeCalendarPayload(payload: unknown): SpeakableEvent[] {
+  const obj =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : {};
+  const list = Array.isArray(obj.events)
+    ? obj.events
+    : Array.isArray(obj.items)
+      ? obj.items
+      : Array.isArray(payload)
+        ? payload
+        : [];
 
-  const payload = await googleJson<{ items?: GoogleEvent[] }>(url);
-  return shapeCalendarResponse(payload.items ?? [], window);
+  const out: SpeakableEvent[] = [];
+  for (const item of list) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const rec = item as Record<string, unknown>;
+    let shaped: SpeakableEvent | null = null;
+    if (typeof rec.when === "string" && (typeof rec.title === "string" || typeof rec.summary === "string")) {
+      const title = typeof rec.title === "string" ? rec.title : String(rec.summary ?? "");
+      const where =
+        typeof rec.where === "string" ? rec.where : typeof rec.location === "string" ? rec.location : "";
+      shaped = {
+        when: truncate(stripHtml(rec.when), 80),
+        title: truncate(stripHtml(title), 80),
+        ...(where ? { where: truncate(stripHtml(where), 60) } : {}),
+      };
+    } else {
+      shaped = shapeCalendarEvent(rec as GoogleEvent);
+    }
+    if (shaped) out.push(shaped);
+    if (out.length >= MAX_RESULTS) break;
+  }
+  return out;
 }

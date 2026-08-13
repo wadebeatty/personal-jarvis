@@ -1,9 +1,9 @@
 import type { Config } from "@netlify/functions";
 import { handleJarvisTool } from "./_shared/http.ts";
-import { searchEmail } from "./_shared/email.ts";
+import { enqueueAndWait } from "./_shared/bridge.ts";
 
 export default async (req: Request) =>
-  handleJarvisTool(req, (input) => searchEmail(input));
+  handleJarvisTool(req, (input) => enqueueAndWait("email", input));
 
 export const config: Config = {
   method: ["POST"],

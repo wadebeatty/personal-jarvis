@@ -10,7 +10,7 @@ This is a **personal aide only** — not Western Pest, not ward ministry.
 - Voice session via [`@elevenlabs/client`](https://www.npmjs.com/package/@elevenlabs/client) (CDN browser bundle)
 - **Authenticated agent** (`enable_auth: true`) — the browser never gets `ELEVENLABS_API_KEY` and never embeds the public `agent-id`
 - Netlify Function `GET /.netlify/functions/signed-url` mints a short-lived signed URL, then the HUD calls `Conversation.startSession({ signedUrl })`
-- **Read-only brain tools (scaffolded, not attached to the agent yet)**: Netlify functions for Google Calendar, Gmail, and Contacts. Webhook paths and schemas are in `scripts/jarvis-tools.schema.json` for Toquer. **Hold ElevenLabs registration** until Google readonly OAuth + `JARVIS_TOOL_SECRET` are set on Netlify. No send-mail, no calendar writes, no SMS.
+- **Read-only brain tools (not attached to the agent yet)**: Netlify webhooks enqueue calendar/email jobs; Toquer/Forge fulfills them via Grok Bot MCP (user-Google-calendar + user-Gmail). Contacts v1 returns a speakable unavailable line (no Contacts MCP). Webhook paths and schemas are in `scripts/jarvis-tools.schema.json`. **Hold ElevenLabs registration** until `JARVIS_TOOL_SECRET` is set and the fulfill agent is polling. **GOOGLE_* is not required on Netlify.** No send-mail, no calendar writes, no SMS.
 
 Out of scope: voice cloning, Western Pest operations, and ward ministry / Steward workflows.
 
@@ -18,7 +18,7 @@ Out of scope: voice cloning, Western Pest operations, and ward ministry / Stewar
 
 | Jarvis **will** | Jarvis **will not** |
 | --- | --- |
-| Answer factual questions from Wade’s calendar, inbox, and contacts | Run Western Pest business ops (jobs, Cleo, dispatch, quotes) |
+| Answer factual questions from Wade’s calendar and inbox | Run Western Pest business ops (jobs, Cleo, dispatch, quotes) |
 | Report a ward meeting if it appears on his personal calendar (facts only) | Do Bishop/ward pastoral care, calling assignments, counseling, or ministry workflow (that stays **Steward**) |
 | Look things up (read-only) | Send email, create/modify calendar events, or text |
 
@@ -37,17 +37,23 @@ Browser HUD  <-- { signedUrl } --
                               v
          Conversation.startSession({ signedUrl, connectionType: "websocket" })
                               |
-                              v
-                    mic capture + agent audio playback
-                              |
                               |  (ElevenLabs server webhook, not the browser)
                               v
-         POST /.netlify/functions/tools-calendar|email|contacts
+         POST /.netlify/functions/tools-calendar|email
               header X-Jarvis-Secret: JARVIS_TOOL_SECRET
                               |
+                              |  enqueue job in Netlify Blobs (pending)
+                              |  poll ~18s for status=done
                               v
-                    Google APIs (calendar.readonly, gmail.readonly, contacts.readonly)
+         GET  /.netlify/functions/bridge-pending     (Toquer/Forge)
+         POST /.netlify/functions/bridge-complete    { id, ok, summary, events|messages }
+                              |
+                              v
+         Grok Bot MCP: user-Google-calendar + user-Gmail
+         (Google credentials stay on the fulfill agent — not on Netlify)
 ```
+
+Contacts (`tools-contacts`) keep the same webhook path but **do not enqueue**. They return `{ ok: false, summary: "Contacts aren’t on a Grok Bot connector yet — ask about email or calendar instead." }`.
 
 1. Wade taps **Initiate**.
 2. The page requests microphone permission, then calls `GET /.netlify/functions/signed-url`.
@@ -56,7 +62,7 @@ Browser HUD  <-- { signedUrl } --
    with header `xi-api-key` from `ELEVENLABS_API_KEY`.
 4. The function returns JSON `{ "signedUrl": "wss://..." }` (camelCase for the client; ElevenLabs itself returns `signed_url`).
 5. The HUD starts a real Client SDK session with that URL. HUD **ONLINE** is set only after `startSession` connects (`onConnect`). Signed URLs last about **15 minutes** to *start* a session; an open conversation can continue after that.
-6. **Later (after Google env + `JARVIS_TOOL_SECRET` are on Netlify, and Toquer attaches the tools):** if Wade asks about schedule / inbox / people, the agent says a brief “let me check”, then ElevenLabs POSTs JSON to the matching tool function with `X-Jarvis-Secret`. Until then, the HUD still talks; tools are not on the agent.
+6. **Later (after `JARVIS_TOOL_SECRET` is on Netlify, the fulfill agent is polling, and Toquer attaches the tools):** if Wade asks about schedule / inbox, the agent says a brief “let me check”, then ElevenLabs POSTs JSON to `tools-calendar` or `tools-email` with `X-Jarvis-Secret`. The function stores a pending job in Netlify Blobs and waits up to ~18s. Toquer/Forge lists jobs on `bridge-pending`, fulfills via Grok Bot MCP, and POSTs `bridge-complete`. Until tools are attached, the HUD still talks.
 7. **End** calls `conversation.endSession()` and returns the HUD to STANDBY.
 
 The public embed widget (`@elevenlabs/convai-widget-embed`) is **not** used. Authenticated agents need the Client SDK; the widget also does not expose `startConversation` / `endConversation`, so a clipped embed would never start a session.
@@ -67,7 +73,7 @@ Agent ID (server-only, via env / function default): `agent_0901kzw48twfeq4ar7jn0
 
 ```bash
 cp .env.example .env
-# put real ELEVENLABS_API_KEY (and tool/Google vars if you want to hit tools locally)
+# put real ELEVENLABS_API_KEY (and JARVIS_TOOL_SECRET to hit tools locally)
 npx netlify-cli dev
 ```
 
@@ -76,7 +82,7 @@ npx netlify-cli dev
 Microphone access needs a secure context (localhost or HTTPS).
 
 ```bash
-npm test        # unit tests (mocked ElevenLabs + Google)
+npm test        # unit tests (mocked ElevenLabs + Blobs bridge)
 npm run typecheck
 ```
 
@@ -93,13 +99,12 @@ npm run typecheck
    | --- | --- |
    | `ELEVENLABS_API_KEY` | ElevenLabs API key (secret) |
    | `ELEVENLABS_AGENT_ID` | `agent_0901kzw48twfeq4ar7jn0f87dx94` |
-   | `JARVIS_TOOL_SECRET` | Long random string; ElevenLabs will send this as `X-Jarvis-Secret` once tools are registered |
-   | `GOOGLE_CLIENT_ID` | OAuth Desktop client ID |
-   | `GOOGLE_CLIENT_SECRET` | OAuth client secret |
-   | `GOOGLE_REFRESH_TOKEN` | From `scripts/google-oauth-setup.mjs` (or Playground with **your** client) |
+   | `JARVIS_TOOL_SECRET` | Long random string; ElevenLabs and the fulfill agent send this as `X-Jarvis-Secret` |
 
-4. Deploy. Production and Deploy Previews both need the same secrets so signed-url and tools can run.
-5. **Hold ElevenLabs tool registration** until `GOOGLE_*` readonly OAuth and `JARVIS_TOOL_SECRET` are set on this site. Toquer then updates the Jarvis prompt/walls and attaches tools using `scripts/jarvis-tools.schema.json`.
+   Do **not** set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, or `GOOGLE_REFRESH_TOKEN` on Netlify. Calendar/email access lives on Toquer/Forge via Grok Bot MCP.
+
+4. Deploy. Production and Deploy Previews both need the same secrets so signed-url and the bridge can run.
+5. **Hold ElevenLabs tool registration** until `JARVIS_TOOL_SECRET` is set and Toquer/Forge is polling `bridge-pending`. Toquer then updates the Jarvis prompt/walls and attaches tools using `scripts/jarvis-tools.schema.json`.
 
 Do **not** prefix these with `VITE_` / `PUBLIC_` — they must stay server-side. Never commit refresh tokens, API keys, or `JARVIS_TOOL_SECRET`.
 
@@ -116,9 +121,9 @@ Do **not** prefix these with `VITE_` / `PUBLIC_` — they must stay server-side.
 
 The function reads env with `Netlify.env.get(...)`. It never returns the API key. Failures return a generic JSON `{ "error": "..." }` without upstream payloads.
 
-## Brain tools (read-only) — scaffolded, not on the agent yet
+## Brain tools (read-only) — connector-bridge, not on the agent yet
 
-All three are `POST` JSON, protected by header `X-Jarvis-Secret` matching `JARVIS_TOOL_SECRET`. Responses are short, speakable JSON (no HTML), capped at **5** items. Timezone: **America/Denver**.
+Calendar and email are `POST` JSON, protected by header `X-Jarvis-Secret` matching `JARVIS_TOOL_SECRET`. They **do not call Google from Netlify**. Each request creates a Blobs job, polls until `status === "done"` (or ~18s timeout), and returns short speakable JSON (no HTML), capped at **5** items. Timezone: **America/Denver**.
 
 Canonical paths + request/response schemas: **`scripts/jarvis-tools.schema.json`**. Draft prompt/walls for Toquer: **`scripts/jarvis-system-prompt.txt`** (not applied to the agent by this repo).
 
@@ -128,9 +133,33 @@ Canonical paths + request/response schemas: **`scripts/jarvis-tools.schema.json`
 | `jarvis_email` | `/.netlify/functions/tools-email` | `https://personal-jarvis-813.netlify.app/.netlify/functions/tools-email` |
 | `jarvis_contacts` | `/.netlify/functions/tools-contacts` | `https://personal-jarvis-813.netlify.app/.netlify/functions/tools-contacts` |
 
-Auth: `POST` + `Content-Type: application/json` + `X-Jarvis-Secret: <JARVIS_TOOL_SECRET>`. Missing/wrong secret → `401 { "error": "Unauthorized" }`. Google env missing → `200 { "ok": false, "summary": "Google access is not configured yet." }`.
+Auth: `POST` + `Content-Type: application/json` + `X-Jarvis-Secret: <JARVIS_TOOL_SECRET>`. Missing/wrong secret → `401 { "error": "Unauthorized" }`. Poll timeout → `200 { "ok": false, "summary": "I couldn’t check your calendar in time. Try again in a moment." }`.
 
 Do **not** copy Western/Cleo tool URLs or secrets. Steward keeps the pastoral lane.
+
+### Fulfill agent (Toquer/Forge)
+
+Same secret header. Google credentials stay on Grok Bot MCP, not Netlify.
+
+| Endpoint | Method | Path |
+| --- | --- | --- |
+| List pending jobs (max 10, oldest first) | `GET` | `/.netlify/functions/bridge-pending` |
+| Mark done + store speakable result | `POST` | `/.netlify/functions/bridge-complete` |
+
+`bridge-complete` body:
+
+```json
+{
+  "id": "<job uuid>",
+  "ok": true,
+  "summary": "2 events tomorrow.",
+  "events": [
+    { "when": "Friday, August 14 9:00 AM to 9:30 AM", "title": "Standup", "where": "Zoom" }
+  ]
+}
+```
+
+Use `messages` instead of `events` for email jobs. The poller returns that payload to ElevenLabs.
 
 ### Request / response schemas
 
@@ -174,7 +203,7 @@ Response:
 }
 ```
 
-**Contacts** `POST /.netlify/functions/tools-contacts`
+**Contacts** `POST /.netlify/functions/tools-contacts` (v1: no enqueue)
 
 Request:
 
@@ -186,58 +215,24 @@ Response:
 
 ```json
 {
-  "ok": true,
-  "summary": "1 contact.",
-  "contacts": [
-    { "name": "Pat Lee", "emails": ["pat@example.com"], "phones": ["+1 435-555-0100"] }
-  ]
+  "ok": false,
+  "summary": "Contacts aren’t on a Grok Bot connector yet — ask about email or calendar instead."
 }
 ```
 
 Shared helpers live in `netlify/functions/_shared/` (underscore prefix so Netlify does not deploy them as functions).
 
-### Google OAuth (one-time, manual) — required before agent registration
-
-Readonly scopes:
-
-- `https://www.googleapis.com/auth/calendar.readonly`
-- `https://www.googleapis.com/auth/gmail.readonly`
-- `https://www.googleapis.com/auth/contacts.readonly`
-
-**Option A — local script (preferred on Wade’s Mac)**
-
-1. Google Cloud Console → enable **Calendar API**, **Gmail API**, **People API**.
-2. OAuth consent screen; add Wade as a test user if the app is in Testing.
-3. Create an OAuth client ID of type **Desktop app**.
-4. Add redirect URI `http://127.0.0.1:8765/oauth2callback`.
-5. From this repo:
-
-```bash
-GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... node scripts/google-oauth-setup.mjs
-```
-
-The script opens a browser, waits for the redirect, and prints `GOOGLE_REFRESH_TOKEN`. Paste client id, secret, and refresh token into Netlify env. Do not commit them.
-
-If the local listener is awkward, use `--paste` and paste the `code` query param from the redirect URL.
-
-**Option B — OAuth Playground**
-
-1. Open [OAuth 2.0 Playground](https://developers.google.com/oauthplayground/).
-2. Gear icon → **Use your own OAuth credentials** (the default Playground client’s refresh tokens expire in ~24h).
-3. Authorize the three readonly scopes above, then Exchange authorization code for tokens.
-4. Copy the refresh token into `GOOGLE_REFRESH_TOKEN`.
-
-This step is required and is not run in CI.
-
 ### ElevenLabs registration — HOLD
 
 Do **not** attach tools to agent `agent_0901kzw48twfeq4ar7jn0f87dx94` until:
 
-1. `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` are on Netlify
-2. `JARVIS_TOOL_SECRET` is on Netlify
-3. The three `tools-*` functions are deployed
+1. `JARVIS_TOOL_SECRET` is on Netlify
+2. The `tools-*` and `bridge-*` functions are deployed
+3. Toquer/Forge is polling `bridge-pending` and completing jobs via Grok Bot MCP
 
-Toquer owns prompt/walls updates (remove “no external tools yet”; keep Western redirect; Steward keeps pastoral care; allow factual calendar/email/contact answers). Use `scripts/jarvis-tools.schema.json` and the draft in `scripts/jarvis-system-prompt.txt`.
+`GOOGLE_*` is **not** required on Netlify.
+
+Toquer owns prompt/walls updates (remove “no external tools yet”; keep Western redirect; Steward keeps pastoral care; allow factual calendar/email answers). Use `scripts/jarvis-tools.schema.json` and the draft in `scripts/jarvis-system-prompt.txt`.
 
 ```bash
 npm run tools:schema    # prints paths + example JSON; no ElevenLabs API calls
@@ -271,18 +266,35 @@ Do not set `agent-id` in the page. The signed URL already authorizes this privat
 
 ## Manual checks
 
-**Functions (no ElevenLabs agent wiring required):**
+**Functions (no ElevenLabs agent wiring required).** Use two terminals so the fulfill step can complete the in-flight calendar request:
 
 ```bash
+# Terminal A — this blocks ~18s until complete (or times out)
 curl -sS -X POST "$URL/.netlify/functions/tools-calendar" \
   -H "Content-Type: application/json" \
   -H "X-Jarvis-Secret: $JARVIS_TOOL_SECRET" \
   -d '{"query":"tomorrow"}'
+
+# Terminal B — job should appear
+curl -sS "$URL/.netlify/functions/bridge-pending" \
+  -H "X-Jarvis-Secret: $JARVIS_TOOL_SECRET"
+
+# Terminal B — complete with a fake summary (copy id from pending)
+curl -sS -X POST "$URL/.netlify/functions/bridge-complete" \
+  -H "Content-Type: application/json" \
+  -H "X-Jarvis-Secret: $JARVIS_TOOL_SECRET" \
+  -d '{"id":"<job-id>","ok":true,"summary":"2 events tomorrow.","events":[{"when":"Friday, August 14 9:00 AM to 9:30 AM","title":"Standup","where":"Zoom"}]}'
 ```
 
-Wrong or missing secret must return `401`. With Google env unset, body is `{ "ok": false, "summary": "Google access is not configured yet." }`.
+Smoke:
 
-**Voice (after Toquer attaches tools and Google env is live):**
+- With secret: `POST tools-calendar` creates a job visible on `GET bridge-pending`
+- `POST bridge-complete` with a fake summary → the waiting `tools-calendar` request returns that summary
+- Without secret → `401`
+
+Contacts with secret returns `{ "ok": false, "summary": "Contacts aren’t on a Grok Bot connector yet — ask about email or calendar instead." }` and does not create a pending job.
+
+**Voice (after Toquer attaches tools and the fulfill agent is polling):**
 
 1. Click **Initiate** and allow the microphone.
 2. HUD should move AUTHORIZING → CONNECTING → **ONLINE**.
@@ -300,12 +312,13 @@ public/                 static HUD (publish directory)
   js/app.js
 netlify/functions/
   signed-url.ts         signed URL minting
-  tools-calendar.ts
-  tools-email.ts
-  tools-contacts.ts
-  _shared/              auth, Google, speakable shaping
+  tools-calendar.ts     enqueue + poll Blobs
+  tools-email.ts        enqueue + poll Blobs
+  tools-contacts.ts     sync unavailable (no enqueue)
+  bridge-pending.ts     GET pending jobs for fulfill agent
+  bridge-complete.ts    POST result the poller waits on
+  _shared/              auth, Blobs bridge, speakable shaping
 scripts/
-  google-oauth-setup.mjs
   register-elevenlabs-tools.mjs   # default: print schemas; --apply later, no agent attach
   jarvis-tools.schema.json        # webhook paths + request/response for Toquer
   jarvis-system-prompt.txt        # draft prompt/walls; not auto-applied

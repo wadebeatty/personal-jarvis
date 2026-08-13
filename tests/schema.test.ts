@@ -23,8 +23,18 @@ test("jarvis-tools.schema.json documents three read-only webhook paths", () => {
     assert.ok(tool.request.properties);
     assert.ok(tool.response.ok);
     assert.ok(tool.examples.request);
-    assert.ok(tool.examples.response.ok === true);
+    if (tool.name === "jarvis_contacts") {
+      assert.equal(tool.examples.response.ok, false);
+      assert.match(tool.examples.response.summary, /Grok Bot connector/);
+    } else {
+      assert.equal(tool.examples.response.ok, true);
+    }
   }
+  assert.match(schema.hold, /JARVIS_TOOL_SECRET/);
+  assert.match(schema.hold, /not required/);
+  assert.equal(schema.bridge.google_env_on_netlify, false);
+  assert.equal(schema.bridge.pending.path, "/.netlify/functions/bridge-pending");
+  assert.equal(schema.bridge.complete.path, "/.netlify/functions/bridge-complete");
   assert.match(schema.walls.is_not.join(" "), /Western Pest/);
   assert.match(schema.walls.is_not.join(" "), /Steward/);
 });
