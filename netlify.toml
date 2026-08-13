@@ -1,6 +1,8 @@
 [build]
   publish = "public"
-  command = "echo 'Static HUD — no frontend build'"
+  # Functions v2 keep `import "@netlify/blobs"` and NFT copies node_modules
+  # into the zip. `netlify deploy --dir --functions` skips this install.
+  command = "npm ci && npm run build"
 
 [build.environment]
   NODE_VERSION = "20"
