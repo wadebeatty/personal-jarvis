@@ -127,11 +127,8 @@ export async function handleJarvisTool(
     return json(body);
   } catch (err) {
     const message = err instanceof Error ? err.message : "";
-    if (message === "google-not-configured") {
-      return speakableError("Google access is not configured yet.");
-    }
-    if (message === "google-auth-failed") {
-      return speakableError("I could not sign in to Google right now.");
+    if (message === "bridge-store-unavailable") {
+      return speakableError("The lookup bridge is not available right now.");
     }
     return speakableError("Something went wrong looking that up.");
   }

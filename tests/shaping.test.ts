@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveCalendarWindow, shapeCalendarEvent, shapeCalendarResponse } from "../netlify/functions/_shared/calendar.ts";
-import { toGmailQuery, shapeEmailMessage, shapeEmailResponse } from "../netlify/functions/_shared/email.ts";
+import { resolveCalendarWindow, shapeCalendarEvent, shapeCalendarResponse, normalizeCalendarPayload } from "../netlify/functions/_shared/calendar.ts";
+import { toGmailQuery, shapeEmailMessage, shapeEmailResponse, normalizeEmailPayload } from "../netlify/functions/_shared/email.ts";
 import { shapeContact, shapeContactsResponse } from "../netlify/functions/_shared/contacts.ts";
 import { zonedInstant, wallTime, addDays, startOfDay } from "../netlify/functions/_shared/denver.ts";
 import { stripHtml, displayFrom } from "../netlify/functions/_shared/speakable.ts";
@@ -76,6 +76,40 @@ test("calendar shaping strips HTML, skips cancelled, caps at 5", () => {
   assert.equal(shaped.events[0].title, "A meet");
   assert.match(shaped.events[0].when, /9:00 AM to 10:00 AM/);
   assert.match(shaped.summary, /5 events tomorrow/);
+});
+
+test("normalizeCalendarPayload and normalizeEmailPayload cap at 5 and strip HTML", () => {
+  const events = normalizeCalendarPayload({
+    events: Array.from({ length: 7 }, (_, i) => ({
+      when: `slot ${i}`,
+      title: i === 0 ? "Standup <b>sync</b>" : `E${i}`,
+    })),
+  });
+  assert.equal(events.length, 5);
+  assert.equal(events[0].title, "Standup sync");
+
+  const fromGoogle = normalizeCalendarPayload({
+    items: [
+      {
+        summary: "Dentist",
+        start: { dateTime: "2026-08-14T09:00:00-06:00" },
+        end: { dateTime: "2026-08-14T09:30:00-06:00" },
+      },
+    ],
+  });
+  assert.equal(fromGoogle[0].title, "Dentist");
+  assert.match(fromGoogle[0].when, /9:00 AM/);
+
+  const messages = normalizeEmailPayload({
+    messages: Array.from({ length: 8 }, (_, i) => ({
+      from: "Ada",
+      subject: `S${i}`,
+      date: "Thursday, August 13 at 12:00 PM",
+      snippet: i === 0 ? "Hello <b>there</b>" : `n${i}`,
+    })),
+  });
+  assert.equal(messages.length, 5);
+  assert.equal(messages[0].snippet, "Hello there");
 });
 
 test("gmail query mapping and speakable email shaping", () => {

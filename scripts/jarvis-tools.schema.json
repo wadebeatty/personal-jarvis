@@ -1,5 +1,5 @@
 {
-  "hold": "Do not register these tools on the ElevenLabs agent until GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN, and JARVIS_TOOL_SECRET are set on the Netlify site. Toquer updates the Jarvis prompt/walls from this file; this repo does not PATCH the agent.",
+  "hold": "The connector-bridge is ready when JARVIS_TOOL_SECRET is set on the Netlify site. GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN are not required on Netlify — Toquer/Forge fulfills jobs via Grok Bot MCP (user-Google-calendar + user-Gmail). Do not register these tools on the ElevenLabs agent until the fulfill agent is polling bridge-pending. Toquer updates the Jarvis prompt/walls from this file; this repo does not PATCH the agent.",
   "agent_id": "agent_0901kzw48twfeq4ar7jn0f87dx94",
   "base_url": "https://personal-jarvis-813.netlify.app",
   "auth": {
@@ -12,6 +12,50 @@
   "timezone": "America/Denver",
   "max_results": 5,
   "read_only": true,
+  "bridge": {
+    "store": "Netlify Blobs (site-scoped, strong consistency, store name jarvis-bridge)",
+    "poll_timeout_seconds": 18,
+    "google_env_on_netlify": false,
+    "pending": {
+      "method": "GET",
+      "path": "/.netlify/functions/bridge-pending",
+      "url": "https://personal-jarvis-813.netlify.app/.netlify/functions/bridge-pending",
+      "auth": "X-Jarvis-Secret",
+      "description": "List pending jobs for the Toquer/Forge fulfill agent. Max 10, oldest first. Jobs older than ~90s are omitted.",
+      "response": {
+        "jobs": [
+          {
+            "id": "uuid",
+            "tool": "calendar",
+            "args": { "query": "tomorrow", "start": "", "end": "" },
+            "createdAt": "2026-08-13T01:00:00.000Z",
+            "status": "pending"
+          }
+        ]
+      }
+    },
+    "complete": {
+      "method": "POST",
+      "path": "/.netlify/functions/bridge-complete",
+      "url": "https://personal-jarvis-813.netlify.app/.netlify/functions/bridge-complete",
+      "auth": "X-Jarvis-Secret",
+      "description": "Mark a job done and store the speakable result the tool poller is waiting on. Cap lists at 5 items. Times America/Denver.",
+      "request": {
+        "id": "uuid from bridge-pending",
+        "ok": true,
+        "summary": "2 events tomorrow.",
+        "events": [{ "when": "Friday, August 14 9:00 AM to 9:30 AM", "title": "Standup", "where": "Zoom" }],
+        "messages": [
+          {
+            "from": "Sarah Connor",
+            "subject": "Invoice",
+            "date": "Thursday, August 13 at 12:00 PM",
+            "snippet": "Please see the invoice attached."
+          }
+        ]
+      }
+    }
+  },
   "walls": {
     "is": "Factual answers from Wade Beatty’s personal calendar, Gmail, and contacts. A ward meeting on the calendar may be reported as a fact only.",
     "is_not": [
@@ -71,7 +115,7 @@
           "required": ["ok", "summary"],
           "properties": {
             "ok": { "const": false },
-            "summary": { "type": "string", "examples": ["Google access is not configured yet.", "No events tomorrow."] }
+            "summary": { "type": "string", "examples": ["I couldn’t check your calendar in time. Try again in a moment.", "No events tomorrow."] }
           }
         }
       },
@@ -158,7 +202,7 @@
       "name": "jarvis_contacts",
       "path": "/.netlify/functions/tools-contacts",
       "url": "https://personal-jarvis-813.netlify.app/.netlify/functions/tools-contacts",
-      "description": "Search Wade Beatty’s Google Contacts by name, email, or phone. Read-only.",
+      "description": "Look up someone in Wade Beatty’s contacts. v1: no Grok Bot Contacts MCP — returns a speakable unavailable summary without enqueueing. Keep this webhook path stable.",
       "request": {
         "type": "object",
         "additionalProperties": false,
@@ -197,13 +241,20 @@
           "required": ["ok", "summary"],
           "properties": {
             "ok": { "const": false },
-            "summary": { "type": "string" }
+            "summary": {
+              "type": "string",
+              "examples": ["Contacts aren’t on a Grok Bot connector yet — ask about email or calendar instead."]
+            }
           }
         }
       },
       "examples": {
         "request": { "query": "Pat Lee" },
         "response": {
+          "ok": false,
+          "summary": "Contacts aren’t on a Grok Bot connector yet — ask about email or calendar instead."
+        },
+        "future_ok_shape": {
           "ok": true,
           "summary": "1 contact.",
           "contacts": [
@@ -229,8 +280,9 @@
   },
   "prompt_notes_for_toquer": [
     "Remove any 'capabilities in v1 are conversational only' / 'no external tools yet' language once tools are actually attached.",
-    "Instruct: use jarvis_calendar / jarvis_email / jarvis_contacts when Wade asks about schedule, inbox, or people; say a brief 'let me check' before tool calls.",
-    "Keep Western redirect; keep Steward for pastoral/ministry actions; allow factual calendar/email/contact answers.",
-    "Do not attach Western/Cleo tool URLs. Draft copy: scripts/jarvis-system-prompt.txt"
+    "Instruct: use jarvis_calendar / jarvis_email when Wade asks about schedule or inbox; say a brief 'let me check' before tool calls.",
+    "jarvis_contacts stays registered as a stable path but v1 has no Grok Bot Contacts MCP — the webhook returns a speakable unavailable line. Prefer calendar/email.",
+    "Keep Western redirect; keep Steward for pastoral/ministry actions; allow factual calendar/email answers.",
+    "Fulfill agent: GET bridge-pending (max 10), run user-Google-calendar / user-Gmail MCP, POST bridge-complete with speakable JSON within ~18s. Do not attach Western/Cleo tool URLs. Draft copy: scripts/jarvis-system-prompt.txt"
   ]
 }
