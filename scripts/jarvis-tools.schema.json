@@ -1,0 +1,236 @@
+{
+  "hold": "Do not register these tools on the ElevenLabs agent until GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN, and JARVIS_TOOL_SECRET are set on the Netlify site. Toquer updates the Jarvis prompt/walls from this file; this repo does not PATCH the agent.",
+  "agent_id": "agent_0901kzw48twfeq4ar7jn0f87dx94",
+  "base_url": "https://personal-jarvis-813.netlify.app",
+  "auth": {
+    "header": "X-Jarvis-Secret",
+    "env": "JARVIS_TOOL_SECRET",
+    "missing_or_wrong": { "status": 401, "body": { "error": "Unauthorized" } }
+  },
+  "method": "POST",
+  "content_type": "application/json",
+  "timezone": "America/Denver",
+  "max_results": 5,
+  "read_only": true,
+  "walls": {
+    "is": "Factual answers from Wade Beatty’s personal calendar, Gmail, and contacts. A ward meeting on the calendar may be reported as a fact only.",
+    "is_not": [
+      "Western Pest business ops (jobs, Cleo, dispatch, quotes, technicians) — redirect to Western / Cleo",
+      "Bishop/ward pastoral care, calling assignments, counseling, or ministry workflow — that stays Steward",
+      "Send email, create/modify calendar events, or SMS"
+    ]
+  },
+  "tools": [
+    {
+      "name": "jarvis_calendar",
+      "path": "/.netlify/functions/tools-calendar",
+      "url": "https://personal-jarvis-813.netlify.app/.netlify/functions/tools-calendar",
+      "description": "Look up Wade Beatty’s personal Google Calendar (America/Denver). Use for schedule, meetings, what’s next, today, tomorrow, or a date range. Read-only.",
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural language calendar query, e.g. 'tomorrow', 'today', 'this week', or a topic like 'dentist'."
+          },
+          "start": {
+            "type": "string",
+            "description": "Optional ISO-8601 start datetime (inclusive). Prefer America/Denver offsets."
+          },
+          "end": {
+            "type": "string",
+            "description": "Optional ISO-8601 end datetime (exclusive). Prefer America/Denver offsets."
+          }
+        }
+      },
+      "response": {
+        "ok": {
+          "type": "object",
+          "required": ["ok", "summary", "events"],
+          "properties": {
+            "ok": { "const": true },
+            "summary": { "type": "string", "description": "One short spoken line, e.g. '2 events tomorrow.'" },
+            "events": {
+              "type": "array",
+              "maxItems": 5,
+              "items": {
+                "type": "object",
+                "required": ["when", "title"],
+                "properties": {
+                  "when": { "type": "string", "examples": ["Thursday, August 14 at 9:00 AM", "All day Thursday, August 14"] },
+                  "title": { "type": "string" },
+                  "where": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "error": {
+          "type": "object",
+          "required": ["ok", "summary"],
+          "properties": {
+            "ok": { "const": false },
+            "summary": { "type": "string", "examples": ["Google access is not configured yet.", "No events tomorrow."] }
+          }
+        }
+      },
+      "examples": {
+        "request": { "query": "tomorrow" },
+        "response": {
+          "ok": true,
+          "summary": "2 events tomorrow.",
+          "events": [
+            { "when": "Friday, August 14 9:00 AM to 9:30 AM", "title": "Standup", "where": "Zoom" },
+            { "when": "All day Friday, August 14", "title": "Ward council" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "jarvis_email",
+      "path": "/.netlify/functions/tools-email",
+      "url": "https://personal-jarvis-813.netlify.app/.netlify/functions/tools-email",
+      "description": "Search Wade Beatty’s Gmail (read-only). Returns from, subject, date, and a short snippet only. Never send mail.",
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural search such as 'from Sarah', 'unread', or a Gmail query like 'from:name@example.com newer_than:14d'."
+          },
+          "q": {
+            "type": "string",
+            "description": "Optional explicit Gmail search string. If set, used as-is."
+          }
+        }
+      },
+      "response": {
+        "ok": {
+          "type": "object",
+          "required": ["ok", "summary", "messages"],
+          "properties": {
+            "ok": { "const": true },
+            "summary": { "type": "string", "description": "e.g. '3 messages.'" },
+            "messages": {
+              "type": "array",
+              "maxItems": 5,
+              "items": {
+                "type": "object",
+                "required": ["from", "subject", "date", "snippet"],
+                "properties": {
+                  "from": { "type": "string" },
+                  "subject": { "type": "string" },
+                  "date": { "type": "string", "description": "Spoken America/Denver datetime" },
+                  "snippet": { "type": "string", "description": "Plain text, no HTML, ~140 chars" }
+                }
+              }
+            }
+          }
+        },
+        "error": {
+          "type": "object",
+          "required": ["ok", "summary"],
+          "properties": {
+            "ok": { "const": false },
+            "summary": { "type": "string" }
+          }
+        }
+      },
+      "examples": {
+        "request": { "query": "any email from Sarah" },
+        "response": {
+          "ok": true,
+          "summary": "1 message.",
+          "messages": [
+            {
+              "from": "Sarah Connor",
+              "subject": "Invoice",
+              "date": "Thursday, August 13 at 12:00 PM",
+              "snippet": "Please see the invoice attached."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "jarvis_contacts",
+      "path": "/.netlify/functions/tools-contacts",
+      "url": "https://personal-jarvis-813.netlify.app/.netlify/functions/tools-contacts",
+      "description": "Search Wade Beatty’s Google Contacts by name, email, or phone. Read-only.",
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["query"],
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Name, email, or phone to look up, e.g. 'Sarah' or '435-555-0100'."
+          }
+        }
+      },
+      "response": {
+        "ok": {
+          "type": "object",
+          "required": ["ok", "summary", "contacts"],
+          "properties": {
+            "ok": { "const": true },
+            "summary": { "type": "string", "description": "e.g. '1 contact.'" },
+            "contacts": {
+              "type": "array",
+              "maxItems": 5,
+              "items": {
+                "type": "object",
+                "required": ["name", "emails", "phones"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "emails": { "type": "array", "items": { "type": "string" }, "maxItems": 3 },
+                  "phones": { "type": "array", "items": { "type": "string" }, "maxItems": 3 }
+                }
+              }
+            }
+          }
+        },
+        "error": {
+          "type": "object",
+          "required": ["ok", "summary"],
+          "properties": {
+            "ok": { "const": false },
+            "summary": { "type": "string" }
+          }
+        }
+      },
+      "examples": {
+        "request": { "query": "Pat Lee" },
+        "response": {
+          "ok": true,
+          "summary": "1 contact.",
+          "contacts": [
+            {
+              "name": "Pat Lee",
+              "emails": ["pat@example.com"],
+              "phones": ["+1 435-555-0100"]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "elevenlabs_webhook_hints": {
+    "method": "POST",
+    "pre_tool_speech": "force",
+    "execution_mode": "post_tool_speech",
+    "response_timeout_secs": 30,
+    "request_headers": {
+      "Content-Type": "application/json",
+      "X-Jarvis-Secret": "<workspace secret JARVIS_TOOL_SECRET — do not hardcode>"
+    }
+  },
+  "prompt_notes_for_toquer": [
+    "Remove any 'capabilities in v1 are conversational only' / 'no external tools yet' language once tools are actually attached.",
+    "Instruct: use jarvis_calendar / jarvis_email / jarvis_contacts when Wade asks about schedule, inbox, or people; say a brief 'let me check' before tool calls.",
+    "Keep Western redirect; keep Steward for pastoral/ministry actions; allow factual calendar/email/contact answers.",
+    "Do not attach Western/Cleo tool URLs. Draft copy: scripts/jarvis-system-prompt.txt"
+  ]
+}
