@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "oauth:google": "node scripts/google-oauth-setup.mjs",
+    "tools:schema": "node scripts/register-elevenlabs-tools.mjs",
     "tools:register": "node scripts/register-elevenlabs-tools.mjs"
   },
   "devDependencies": {

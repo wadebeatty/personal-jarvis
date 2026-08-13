@@ -1,29 +1,35 @@
 #!/usr/bin/env node
 /**
- * Create/update Jarvis webhook tools in ElevenLabs and attach them to the
- * personal agent. Reads secrets from env — never hardcode them.
+ * Jarvis webhook tool schemas + optional later ElevenLabs workspace upsert.
  *
- * Required env:
+ * HOLD: do not register tools on the ElevenLabs agent yet. Toquer updates
+ * prompt/walls from scripts/jarvis-tools.schema.json after Google readonly
+ * OAuth + JARVIS_TOOL_SECRET are set on Netlify.
+ *
+ * Default (no flags): print webhook paths and request/response schemas. No API calls.
+ *
+ * Later, after Netlify env is live:
+ *   node scripts/register-elevenlabs-tools.mjs --apply
+ *     Creates/updates workspace secret + webhook tools only.
+ *     Does NOT attach tool_ids to the agent and does NOT PATCH the prompt.
+ *
+ * There is no --attach-agent flag. Agent wiring stays with Toquer.
+ *
+ * Required for --apply:
  *   ELEVENLABS_API_KEY
- *   JARVIS_TOOL_SECRET
- *
+ *   JARVIS_TOOL_SECRET   (must match Netlify)
  * Optional:
- *   ELEVENLABS_AGENT_ID   (default: agent_0901kzw48twfeq4ar7jn0f87dx94)
- *   JARVIS_TOOL_BASE_URL  (default: https://personal-jarvis-813.netlify.app)
- *
- * Usage:
- *   node scripts/register-elevenlabs-tools.mjs
+ *   JARVIS_TOOL_BASE_URL (default: https://personal-jarvis-813.netlify.app)
  */
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const DEFAULT_AGENT_ID = "agent_0901kzw48twfeq4ar7jn0f87dx94";
 const DEFAULT_BASE = "https://personal-jarvis-813.netlify.app";
 const API = "https://api.elevenlabs.io/v1";
 const SECRET_NAME = "JARVIS_TOOL_SECRET";
-const TOOL_NAMES = ["jarvis_calendar", "jarvis_email", "jarvis_contacts"];
+const SCHEMA_PATH = join(ROOT, "scripts/jarvis-tools.schema.json");
 
 function loadDotEnv() {
   const path = join(ROOT, ".env");
@@ -47,10 +53,36 @@ function loadDotEnv() {
 
 loadDotEnv();
 
+const schema = JSON.parse(readFileSync(SCHEMA_PATH, "utf8"));
+const apply = process.argv.includes("--apply");
+const baseUrl = (process.env.JARVIS_TOOL_BASE_URL || schema.base_url || DEFAULT_BASE).replace(
+  /\/$/,
+  "",
+);
+
+function printHoldAndSchemas() {
+  console.log(`HOLD: ${schema.hold}\n`);
+  console.log("Webhook paths (POST, header X-Jarvis-Secret):\n");
+  for (const tool of schema.tools) {
+    console.log(`  ${tool.name}`);
+    console.log(`    ${baseUrl}${tool.path}`);
+    console.log(`    request:  ${JSON.stringify(tool.examples.request)}`);
+    console.log(`    response: ${JSON.stringify(tool.examples.response)}\n`);
+  }
+  console.log("Full request/response schemas: scripts/jarvis-tools.schema.json");
+  console.log("Draft prompt for Toquer (not applied): scripts/jarvis-system-prompt.txt");
+  console.log("\nThis command made no ElevenLabs API calls.");
+  console.log("After Google OAuth + JARVIS_TOOL_SECRET are on Netlify, Toquer can wire the agent.");
+  console.log("Workspace-only upsert later: node scripts/register-elevenlabs-tools.mjs --apply");
+}
+
+if (!apply) {
+  printHoldAndSchemas();
+  process.exit(0);
+}
+
 const apiKey = process.env.ELEVENLABS_API_KEY;
 const toolSecret = process.env.JARVIS_TOOL_SECRET;
-const agentId = process.env.ELEVENLABS_AGENT_ID || DEFAULT_AGENT_ID;
-const baseUrl = (process.env.JARVIS_TOOL_BASE_URL || DEFAULT_BASE).replace(/\/$/, "");
 
 if (!apiKey) {
   console.error("Set ELEVENLABS_API_KEY.");
@@ -60,9 +92,6 @@ if (!toolSecret) {
   console.error("Set JARVIS_TOOL_SECRET (same value as the Netlify env var).");
   process.exit(1);
 }
-
-const promptPath = join(ROOT, "scripts/jarvis-system-prompt.txt");
-const systemPrompt = readFileSync(promptPath, "utf8").trim();
 
 function headers() {
   return {
@@ -86,25 +115,27 @@ async function api(method, path, body) {
   }
   if (!res.ok) {
     const detail = json?.detail || json?.error || json?.message || text.slice(0, 400);
-    throw new Error(`${method} ${path} → ${res.status}: ${typeof detail === "string" ? detail : JSON.stringify(detail)}`);
+    throw new Error(
+      `${method} ${path} → ${res.status}: ${typeof detail === "string" ? detail : JSON.stringify(detail)}`,
+    );
   }
   return json;
 }
 
-function stringProp(description, required = false) {
-  return { type: "string", description, ...(required ? {} : {}) };
-}
-
-function toolConfig(name, description, url, properties, required) {
+function toolConfig(tool, secretId) {
+  const properties = {};
+  for (const [key, spec] of Object.entries(tool.request.properties || {})) {
+    properties[key] = { type: "string", description: spec.description || "" };
+  }
   return {
     type: "webhook",
-    name,
-    description,
-    response_timeout_secs: 30,
-    pre_tool_speech: "force",
-    execution_mode: "post_tool_speech",
+    name: tool.name,
+    description: tool.description,
+    response_timeout_secs: schema.elevenlabs_webhook_hints.response_timeout_secs,
+    pre_tool_speech: schema.elevenlabs_webhook_hints.pre_tool_speech,
+    execution_mode: schema.elevenlabs_webhook_hints.execution_mode,
     api_schema: {
-      url,
+      url: `${baseUrl}${tool.path}`,
       method: "POST",
       request_headers: {
         "Content-Type": "application/json",
@@ -114,51 +145,10 @@ function toolConfig(name, description, url, properties, required) {
         type: "object",
         description: "JSON body for this Jarvis lookup.",
         properties,
-        required,
+        required: tool.request.required || [],
       },
     },
   };
-}
-
-let secretId = "";
-
-function buildTools() {
-  return [
-    toolConfig(
-      "jarvis_calendar",
-      "Look up Wade Beatty’s personal Google Calendar (America/Denver). Use for schedule, meetings, what’s next, today, tomorrow, or a date range. Read-only. Pass a natural query such as 'tomorrow' or 'dentist', and optional start/end ISO-8601 datetimes.",
-      `${baseUrl}/.netlify/functions/tools-calendar`,
-      {
-        query: stringProp(
-          "Natural language calendar query, e.g. 'tomorrow', 'today', 'this week', or a topic like 'dentist'.",
-        ),
-        start: stringProp("Optional ISO-8601 start datetime (inclusive). Prefer America/Denver offsets."),
-        end: stringProp("Optional ISO-8601 end datetime (exclusive). Prefer America/Denver offsets."),
-      },
-      [],
-    ),
-    toolConfig(
-      "jarvis_email",
-      "Search Wade Beatty’s Gmail (read-only). Use when he asks about recent mail, whether someone emailed him, or a subject. Returns from, subject, date, and a short snippet only. Never send mail.",
-      `${baseUrl}/.netlify/functions/tools-email`,
-      {
-        query: stringProp(
-          "Natural search such as 'from Sarah', 'unread', or a Gmail query like 'from:name@example.com newer_than:14d'.",
-        ),
-        q: stringProp("Optional explicit Gmail search string. If set, used as-is."),
-      },
-      [],
-    ),
-    toolConfig(
-      "jarvis_contacts",
-      "Search Wade Beatty’s Google Contacts by name, email, or phone. Read-only. Returns display name, emails, and phone numbers.",
-      `${baseUrl}/.netlify/functions/tools-contacts`,
-      {
-        query: stringProp("Name, email, or phone to look up, e.g. 'Sarah' or '435-555-0100'."),
-      },
-      ["query"],
-    ),
-  ];
 }
 
 async function upsertSecret() {
@@ -203,46 +193,24 @@ async function upsertTool(config) {
   if (existing && toolId(existing)) {
     const id = toolId(existing);
     await api("PATCH", `/convai/tools/${id}`, body);
-    console.log(`Updated tool ${config.name} (${id})`);
+    console.log(`Updated workspace tool ${config.name} (${id}) — not attached to the agent`);
     return id;
   }
   const created = await api("POST", "/convai/tools", body);
   const id = toolId(created);
   if (!id) throw new Error(`Create ${config.name} did not return an id`);
-  console.log(`Created tool ${config.name} (${id})`);
+  console.log(`Created workspace tool ${config.name} (${id}) — not attached to the agent`);
   return id;
 }
 
-async function attachToAgent(toolIds) {
-  const agent = await api("GET", `/convai/agents/${agentId}`);
-  const currentIds = agent?.conversation_config?.agent?.prompt?.tool_ids || [];
-  const listed = await api("GET", "/convai/tools?search=jarvis_");
-  const jarvisIds = new Set(
-    (listed?.tools || [])
-      .filter((t) => TOOL_NAMES.includes(t.tool_config?.name || t.name))
-      .map(toolId)
-      .filter(Boolean),
-  );
-  const unique = [...new Set([...currentIds.filter((id) => !jarvisIds.has(id)), ...toolIds])];
+console.log(
+  "HOLD reminder: this upserts workspace tools only. It does not attach them to the Jarvis agent or change the prompt.\n",
+);
 
-  await api("PATCH", `/convai/agents/${agentId}`, {
-    conversation_config: {
-      agent: {
-        prompt: {
-          prompt: systemPrompt,
-          tool_ids: unique,
-          timezone: "America/Denver",
-        },
-      },
-    },
-  });
-  console.log(`Updated agent ${agentId} with ${unique.length} tool_id(s) and the Jarvis system prompt.`);
+const secretId = await upsertSecret();
+for (const tool of schema.tools) {
+  await upsertTool(toolConfig(tool, secretId));
 }
-
-secretId = await upsertSecret();
-const ids = [];
-for (const config of buildTools()) {
-  ids.push(await upsertTool(config));
-}
-await attachToAgent(ids);
-console.log("\nDone. Voice-test: “What’s on my calendar tomorrow?” and “Any email from …?”");
+console.log(
+  "\nWorkspace tools ready. Toquer still needs to attach tool_ids and update prompt/walls on the agent.",
+);

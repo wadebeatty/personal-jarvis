@@ -10,7 +10,7 @@ This is a **personal aide only** — not Western Pest, not ward ministry.
 - Voice session via [`@elevenlabs/client`](https://www.npmjs.com/package/@elevenlabs/client) (CDN browser bundle)
 - **Authenticated agent** (`enable_auth: true`) — the browser never gets `ELEVENLABS_API_KEY` and never embeds the public `agent-id`
 - Netlify Function `GET /.netlify/functions/signed-url` mints a short-lived signed URL, then the HUD calls `Conversation.startSession({ signedUrl })`
-- **Read-only brain tools** (server-side only): Google Calendar, Gmail, and Contacts. Jarvis can answer “what’s on my calendar tomorrow?” and “any email from X?” during a call. No send-mail, no calendar writes, no SMS.
+- **Read-only brain tools (scaffolded, not attached to the agent yet)**: Netlify functions for Google Calendar, Gmail, and Contacts. Webhook paths and schemas are in `scripts/jarvis-tools.schema.json` for Toquer. **Hold ElevenLabs registration** until Google readonly OAuth + `JARVIS_TOOL_SECRET` are set on Netlify. No send-mail, no calendar writes, no SMS.
 
 Out of scope: voice cloning, Western Pest operations, and ward ministry / Steward workflows.
 
@@ -56,7 +56,7 @@ Browser HUD  <-- { signedUrl } --
    with header `xi-api-key` from `ELEVENLABS_API_KEY`.
 4. The function returns JSON `{ "signedUrl": "wss://..." }` (camelCase for the client; ElevenLabs itself returns `signed_url`).
 5. The HUD starts a real Client SDK session with that URL. HUD **ONLINE** is set only after `startSession` connects (`onConnect`). Signed URLs last about **15 minutes** to *start* a session; an open conversation can continue after that.
-6. If Wade asks about schedule / inbox / people, the agent says a brief “let me check”, then ElevenLabs POSTs JSON to the matching tool function with `X-Jarvis-Secret`.
+6. **Later (after Google env + `JARVIS_TOOL_SECRET` are on Netlify, and Toquer attaches the tools):** if Wade asks about schedule / inbox / people, the agent says a brief “let me check”, then ElevenLabs POSTs JSON to the matching tool function with `X-Jarvis-Secret`. Until then, the HUD still talks; tools are not on the agent.
 7. **End** calls `conversation.endSession()` and returns the HUD to STANDBY.
 
 The public embed widget (`@elevenlabs/convai-widget-embed`) is **not** used. Authenticated agents need the Client SDK; the widget also does not expose `startConversation` / `endConversation`, so a clipped embed would never start a session.
@@ -93,13 +93,13 @@ npm run typecheck
    | --- | --- |
    | `ELEVENLABS_API_KEY` | ElevenLabs API key (secret) |
    | `ELEVENLABS_AGENT_ID` | `agent_0901kzw48twfeq4ar7jn0f87dx94` |
-   | `JARVIS_TOOL_SECRET` | Long random string; same value the register script sends to ElevenLabs |
+   | `JARVIS_TOOL_SECRET` | Long random string; ElevenLabs will send this as `X-Jarvis-Secret` once tools are registered |
    | `GOOGLE_CLIENT_ID` | OAuth Desktop client ID |
    | `GOOGLE_CLIENT_SECRET` | OAuth client secret |
    | `GOOGLE_REFRESH_TOKEN` | From `scripts/google-oauth-setup.mjs` (or Playground with **your** client) |
 
 4. Deploy. Production and Deploy Previews both need the same secrets so signed-url and tools can run.
-5. After the functions are live, run `npm run tools:register` once (see below) so the ElevenLabs agent points at production URLs.
+5. **Hold ElevenLabs tool registration** until `GOOGLE_*` readonly OAuth and `JARVIS_TOOL_SECRET` are set on this site. Toquer then updates the Jarvis prompt/walls and attaches tools using `scripts/jarvis-tools.schema.json`.
 
 Do **not** prefix these with `VITE_` / `PUBLIC_` — they must stay server-side. Never commit refresh tokens, API keys, or `JARVIS_TOOL_SECRET`.
 
@@ -116,21 +116,87 @@ Do **not** prefix these with `VITE_` / `PUBLIC_` — they must stay server-side.
 
 The function reads env with `Netlify.env.get(...)`. It never returns the API key. Failures return a generic JSON `{ "error": "..." }` without upstream payloads.
 
-## Brain tools (read-only)
+## Brain tools (read-only) — scaffolded, not on the agent yet
 
 All three are `POST` JSON, protected by header `X-Jarvis-Secret` matching `JARVIS_TOOL_SECRET`. Responses are short, speakable JSON (no HTML), capped at **5** items. Timezone: **America/Denver**.
 
-| Function | URL | Body | Speaks |
-| --- | --- | --- | --- |
-| `tools-calendar.ts` | `/.netlify/functions/tools-calendar` | `{ query, start?, end? }` | `summary` + `events[{ when, title, where }]` |
-| `tools-email.ts` | `/.netlify/functions/tools-email` | `{ query, q? }` | `summary` + `messages[{ from, subject, date, snippet }]` |
-| `tools-contacts.ts` | `/.netlify/functions/tools-contacts` | `{ query }` | `summary` + `contacts[{ name, emails, phones }]` |
+Canonical paths + request/response schemas: **`scripts/jarvis-tools.schema.json`**. Draft prompt/walls for Toquer: **`scripts/jarvis-system-prompt.txt`** (not applied to the agent by this repo).
 
-Missing/wrong secret → `401`. Google env missing → `{ ok: false, summary: "Google access is not configured yet." }` (so Jarvis can say that out loud).
+| Tool name | Webhook path | Absolute URL |
+| --- | --- | --- |
+| `jarvis_calendar` | `/.netlify/functions/tools-calendar` | `https://personal-jarvis-813.netlify.app/.netlify/functions/tools-calendar` |
+| `jarvis_email` | `/.netlify/functions/tools-email` | `https://personal-jarvis-813.netlify.app/.netlify/functions/tools-email` |
+| `jarvis_contacts` | `/.netlify/functions/tools-contacts` | `https://personal-jarvis-813.netlify.app/.netlify/functions/tools-contacts` |
+
+Auth: `POST` + `Content-Type: application/json` + `X-Jarvis-Secret: <JARVIS_TOOL_SECRET>`. Missing/wrong secret → `401 { "error": "Unauthorized" }`. Google env missing → `200 { "ok": false, "summary": "Google access is not configured yet." }`.
+
+Do **not** copy Western/Cleo tool URLs or secrets. Steward keeps the pastoral lane.
+
+### Request / response schemas
+
+**Calendar** `POST /.netlify/functions/tools-calendar`
+
+Request:
+
+```json
+{ "query": "tomorrow", "start": "optional ISO-8601", "end": "optional ISO-8601" }
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "summary": "2 events tomorrow.",
+  "events": [
+    { "when": "Friday, August 14 9:00 AM to 9:30 AM", "title": "Standup", "where": "Zoom" }
+  ]
+}
+```
+
+**Email** `POST /.netlify/functions/tools-email`
+
+Request:
+
+```json
+{ "query": "any email from Sarah", "q": "optional raw Gmail query" }
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "summary": "1 message.",
+  "messages": [
+    { "from": "Sarah Connor", "subject": "Invoice", "date": "Thursday, August 13 at 12:00 PM", "snippet": "Please see the invoice attached." }
+  ]
+}
+```
+
+**Contacts** `POST /.netlify/functions/tools-contacts`
+
+Request:
+
+```json
+{ "query": "Pat Lee" }
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "summary": "1 contact.",
+  "contacts": [
+    { "name": "Pat Lee", "emails": ["pat@example.com"], "phones": ["+1 435-555-0100"] }
+  ]
+}
+```
 
 Shared helpers live in `netlify/functions/_shared/` (underscore prefix so Netlify does not deploy them as functions).
 
-### Google OAuth (one-time, manual)
+### Google OAuth (one-time, manual) — required before agent registration
 
 Readonly scopes:
 
@@ -163,27 +229,23 @@ If the local listener is awkward, use `--paste` and paste the `code` query param
 
 This step is required and is not run in CI.
 
-### Register ElevenLabs webhook tools
+### ElevenLabs registration — HOLD
 
-After production has the tool functions and `JARVIS_TOOL_SECRET`:
+Do **not** attach tools to agent `agent_0901kzw48twfeq4ar7jn0f87dx94` until:
+
+1. `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` are on Netlify
+2. `JARVIS_TOOL_SECRET` is on Netlify
+3. The three `tools-*` functions are deployed
+
+Toquer owns prompt/walls updates (remove “no external tools yet”; keep Western redirect; Steward keeps pastoral care; allow factual calendar/email/contact answers). Use `scripts/jarvis-tools.schema.json` and the draft in `scripts/jarvis-system-prompt.txt`.
 
 ```bash
-# .env should contain ELEVENLABS_API_KEY and JARVIS_TOOL_SECRET
-npm run tools:register
+npm run tools:schema    # prints paths + example JSON; no ElevenLabs API calls
 ```
 
-`scripts/register-elevenlabs-tools.mjs` will:
+`scripts/register-elevenlabs-tools.mjs --apply` is a **later** workspace-only upsert (secret + webhook tools). It does **not** attach `tool_ids` to the agent and does **not** PATCH the prompt. There is no attach-agent flag.
 
-1. Create or update workspace secret `JARVIS_TOOL_SECRET` (value from env — not hardcoded).
-2. Create or update webhook tools `jarvis_calendar`, `jarvis_email`, `jarvis_contacts` pointing at  
-   `https://personal-jarvis-813.netlify.app/.netlify/functions/tools-*`  
-   (`POST`, header `X-Jarvis-Secret` via that secret).
-3. Attach those `tool_ids` to agent `agent_0901kzw48twfeq4ar7jn0f87dx94`.
-4. Replace the agent system prompt with `scripts/jarvis-system-prompt.txt` (tools + walls; no “conversational only”).
-
-Optional: `JARVIS_TOOL_BASE_URL` for a preview deploy. Re-run the script after prompt or URL changes.
-
-Do **not** copy Western/Cleo tool URLs or secrets into this project.
+Optional: `JARVIS_TOOL_BASE_URL` if `--apply` should target a preview deploy.
 
 ## Voice client
 
@@ -207,21 +269,9 @@ HUD states track the real session:
 
 Do not set `agent-id` in the page. The signed URL already authorizes this private agent. Tool calls never go through the browser.
 
-## Manual voice check
+## Manual checks
 
-On the deployed site (HTTPS), after Google env + `JARVIS_TOOL_SECRET` are set and `npm run tools:register` has been run:
-
-1. Click **Initiate** and allow the microphone.
-2. HUD should move AUTHORIZING → CONNECTING → **ONLINE** (not ONLINE before the session exists).
-3. Hear Jarvis’s first spoken message (orb **SPEAKING**).
-4. Ask: **“What’s on my calendar tomorrow?”** — he should say a brief “let me check”, then read events (or say there are none).
-5. Ask: **“Any email from [someone in your inbox]?”** — subject / from / short gist only.
-6. Ask: **“What’s [contact name]’s number?”**
-7. Ask something Western-ops or ward-pastoral — he should redirect (Western / Cleo, or Steward), not call those systems.
-8. Click **End conversation** → STANDBY.
-9. ElevenLabs conversation history for the agent should show the session and tool calls.
-
-Local curl check (does not need ElevenLabs):
+**Functions (no ElevenLabs agent wiring required):**
 
 ```bash
 curl -sS -X POST "$URL/.netlify/functions/tools-calendar" \
@@ -230,7 +280,16 @@ curl -sS -X POST "$URL/.netlify/functions/tools-calendar" \
   -d '{"query":"tomorrow"}'
 ```
 
-Wrong or missing secret must return `401`.
+Wrong or missing secret must return `401`. With Google env unset, body is `{ "ok": false, "summary": "Google access is not configured yet." }`.
+
+**Voice (after Toquer attaches tools and Google env is live):**
+
+1. Click **Initiate** and allow the microphone.
+2. HUD should move AUTHORIZING → CONNECTING → **ONLINE**.
+3. Ask: **“What’s on my calendar tomorrow?”** — brief “let me check”, then events (or none).
+4. Ask: **“Any email from [someone in your inbox]?”**
+5. Ask something Western-ops or ward-pastoral — redirect to Western / Cleo or Steward; do not call those systems.
+6. Click **End conversation** → STANDBY.
 
 ## Repo layout
 
@@ -247,8 +306,9 @@ netlify/functions/
   _shared/              auth, Google, speakable shaping
 scripts/
   google-oauth-setup.mjs
-  register-elevenlabs-tools.mjs
-  jarvis-system-prompt.txt
+  register-elevenlabs-tools.mjs   # default: print schemas; --apply later, no agent attach
+  jarvis-tools.schema.json        # webhook paths + request/response for Toquer
+  jarvis-system-prompt.txt        # draft prompt/walls; not auto-applied
 tests/
 netlify.toml
 .env.example
